@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 
+`include "defines.vh"
 `define BHT_IDX_W 10                    // 表索引位宽
 `define BHT_ENTRY (1 << `BHT_IDX_W)     // 表项个数
 `define BHT_TAG_W 8                     // tag字段位宽

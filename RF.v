@@ -10,7 +10,8 @@ module RF (
     input  wire         we,
     input  wire [31:0]  wD,
     output reg  [31:0]  rD1,
-    output reg  [31:0]  rD2
+    output reg  [31:0]  rD2,
+    output wire[31:0] rf_o [31:1]//difftest
 
     // inc_dev
 //    input  wire         sync_we,
@@ -37,5 +38,7 @@ always @(*) begin
     rD1 = (rR1 == 5'h0) ? 32'h0 : r[rR1];
     rD2 = (rR2 == 5'h0) ? 32'h0 : r[rR2];
 end
+
+assign rf_o = r;
 
 endmodule

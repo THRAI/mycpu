@@ -1,3 +1,6 @@
+`timescale 1ns / 1ps
+
+`include "defines.vh"
 module clz (
     input wire [31:0] clz_input,
     output reg [4:0] clz_out

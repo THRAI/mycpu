@@ -7,7 +7,7 @@ module ID_EX (
     input  wire         cpu_rstn,
     input  wire         suspend,
     input  wire         valid_in,
-
+    input  wire[31:0]   inst_in,
     input  wire[4:0]    wR_in,
     input  wire[31:0]   pc_in,
     input  wire[31:0]   pc4_in,
@@ -37,6 +37,7 @@ module ID_EX (
 
 
     output reg          valid_out,
+    output reg [31:0]   inst_out,
     output reg [4:0]    wR_out,
     output reg [31:0]   pc_out,
     output reg [31:0]   pc4_out,
@@ -64,6 +65,7 @@ module ID_EX (
 
 always @(posedge cpu_clk) begin
     valid_out       <= !cpu_rstn ?  1'h0 : suspend ? valid_out      : valid_in;
+    inst_out        <= !cpu_rstn ?  1'b0 : suspend ? inst_out       : inst_in; 
     wR_out          <= !cpu_rstn ?  5'h0 : suspend ? wR_out         : wR_in;
     pc_out          <= !cpu_rstn ? 32'h0 : suspend ? pc_out         : pc_in;
     pc4_out         <= !cpu_rstn ? 32'h0 : suspend ? pc4_out        : pc4_in;

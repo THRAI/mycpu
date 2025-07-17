@@ -56,7 +56,7 @@ module inst_cache(
     wire [ `TAG_SIZE-1:0] tag_from_set0  = /* TODO */ cache_line_r0[`TAG_FROM_SET_LOC];    // Cache组内第0块的TAG
     wire [ `TAG_SIZE-1:0] tag_from_set1  = /* TODO */ cache_line_r1[`TAG_FROM_SET_LOC];    // Cache组内第1块的TAG
 
-    // TODO: 定义ICache状态机的状态变量
+    //TODO:定义ICache状态机的状态变量
     reg [1:0] current_state, next_state;
 
     localparam IDLE         = 2'b00; 

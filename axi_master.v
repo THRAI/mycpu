@@ -1,4 +1,4 @@
-`timescale 1ns / 1ps
+`timescale 1ns/1ps
 
 `include "defines.vh"
 
@@ -67,143 +67,14 @@ module axi_master(
     input  wire         m_axi_rlast ,
     input  wire         m_axi_rvalid
 );
-
     assign m_axi_awid    = 4'h8;
     assign m_axi_awlock  = 2'h0;
     assign m_axi_awcache = 4'h2;
     assign m_axi_awprot  = 3'h0;
     assign m_axi_wid     = 4'h8;
-    assign m_axi_arid    = 4'h8;
-    assign m_axi_arlock  = 2'h0;
-    assign m_axi_arcache = 4'h2;
-    assign m_axi_arprot  = 3'h0;
-
     wire has_dc_wr_req = dc_dev_wrdy & (dc_cpu_wen != 4'h0);
-    
-    wire [1:0] cpu_ren;
 
-    reg [255:0] buffer;
-    reg [ 31:0] cpu_raddr;
-    reg [  3:0] cur_state;
-    reg [  3:0] next_state;
-    reg client;     // remember who's my client
-   
-    // Handle cache signal
-    assign cpu_ren = {dc_cpu_ren, ic_cpu_ren};
-    assign requested = |cpu_ren;
-    
-    localparam         IDLE = 4'd0;  // states
-    localparam WAIT_ARREADY = 4'd1;
-    localparam  WAIT_RVALID = 4'd2;
-    localparam       LOAD_1 = 4'd3;
-    localparam       LOAD_2 = 4'd4;
-    localparam       LOAD_3 = 4'd5;
-    localparam       LOAD_4 = 4'd6;
-    localparam       LOAD_5 = 4'd7;
-    localparam       LOAD_6 = 4'd8;
-    localparam       LOAD_7 = 4'd9;
-    localparam         FILL = 4'd10;
-    
-    localparam       ICACHE = 1'b0; // client
-    localparam       DCACHE = 1'b1;
-    
-    localparam         INCR = 2'b01; // burst mode
-    
-    // FSM for the whole read process
-    always@(posedge aclk or negedge aresetn) begin
-        if (!aresetn) cur_state <= IDLE;
-        else cur_state <= next_state;
-    end
-    
-    always@(*) begin
-        case (cur_state)
-            IDLE:         next_state = requested     ? WAIT_ARREADY  : IDLE;
-            WAIT_ARREADY: next_state = m_axi_arready ? WAIT_RVALID   : WAIT_ARREADY;
-            WAIT_RVALID:  next_state = m_axi_rvalid  ? LOAD_1        : WAIT_RVALID;
-            LOAD_1:       next_state = LOAD_2;
-            LOAD_2:       next_state = LOAD_3;
-            LOAD_3:       next_state = LOAD_4;
-            LOAD_4:       next_state = LOAD_5;
-            LOAD_5:       next_state = LOAD_6;
-            LOAD_6:       next_state = LOAD_7;
-            LOAD_7:       next_state = FILL;
-            FILL:         next_state = IDLE;
-            default:      next_state = IDLE;
-        endcase
-    end
-    
-    always@(posedge aclk or negedge aresetn) begin
-        if (!aresetn) begin
-            {ic_dev_rrdy,   dc_dev_rrdy}    <= 2'b0;
-            {ic_dev_rvalid, dc_dev_rvalid}  <= 2'b0;
-            {ic_dev_rdata,  dc_dev_rdata}   <= 256'b0;
-            buffer        <= 256'b0;
-            m_axi_arvalid <= 1'b0;
-        end
-        case (cur_state)
-            IDLE: begin
-                if (requested) begin
-                    {dc_dev_rrdy, ic_dev_rrdy} <= 2'b0; 
-                    if (dc_cpu_ren) begin
-                        client <= DCACHE;
-                        cpu_raddr <= dc_cpu_raddr;
-                    end else begin
-                        client <= ICACHE;
-                        cpu_raddr <= ic_cpu_raddr;
-                    end
-                end else begin
-                    {dc_dev_rrdy, ic_dev_rrdy}   <= 2'b11;
-                    {dc_dev_rvalid, ic_dev_rvalid} <= 2'b0;
-                end
-             end
-             
-             WAIT_ARREADY: begin
-                if (~m_axi_arready) begin
-                    m_axi_araddr  <= cpu_raddr;
-                    m_axi_arlen   <= 8'd7;
-                    m_axi_arsize  <= 3'd2;
-                    m_axi_arburst <= INCR;
-                    m_axi_arvalid <= 1'b1;
-                end else begin
-                    m_axi_arvalid <= 1'b0;
-                end
-             end
-             
-             WAIT_RVALID: begin
-                if (m_axi_rvalid) buffer[31:0] <= m_axi_rdata;
-             end
-             
-             LOAD_1: buffer[63  : 32]  <= m_axi_rdata;
-             LOAD_2: buffer[95  : 64]  <= m_axi_rdata;
-             LOAD_3: buffer[127 : 96]  <= m_axi_rdata;
-             LOAD_4: buffer[159 : 128] <= m_axi_rdata;
-             LOAD_5: buffer[191 : 160] <= m_axi_rdata;
-             LOAD_6: buffer[223 : 192] <= m_axi_rdata;
-             LOAD_7: buffer[255 : 224] <= m_axi_rdata;
-             
-             FILL: begin
-                {dc_dev_rrdy, ic_dev_rrdy} <= 2'b11;
-                if (client == DCACHE) begin
-                    dc_dev_rdata <= buffer;
-                    dc_dev_rvalid <= 1'b1;
-                end else begin
-                    ic_dev_rdata <= buffer;
-                    ic_dev_rvalid <= 1'b1;
-                end
-             end
-              
-             default: {ic_dev_rrdy, dc_dev_rrdy} <= 2'b00;
-             
-        endcase
-    end
-        
-
-    assign m_axi_rready = !aresetn ? 1'b0 : 1'b1;
-
-
-
-    /******** ��Ҫ�޸����´��� ********/
-    ///////////////////////////////////////////////////////////////////////////
+ ///////////////////////////////////////////////////////
     // write address channel
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -225,7 +96,7 @@ module axi_master(
         end
     end
 
-    ///////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////
     // write data channel
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -245,7 +116,7 @@ module axi_master(
 
     assign m_axi_wlast = m_axi_wvalid;
 
-    ///////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////
     // write response channel
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -261,4 +132,111 @@ module axi_master(
 
     assign m_axi_bready = !aresetn ? 1'b0 : 1'b1;
 
+    //////////////////////////////////////////////////////
+    // ICACHE / DCACHE read interfaces
+    reg client;
+    localparam CLIENT_ICACHE = 1'b0;
+    localparam CLIENT_DCACHE = 1'b1;
+    always @ (posedge aclk or negedge aresetn) begin
+        if (!ar_handshake_done && requested) begin
+            if (ic_cpu_ren) begin
+                client      <= CLIENT_ICACHE;
+            end else begin
+                client      <= CLIENT_DCACHE;
+            end
+        end
+    end
+
+    reg read_issued;
+    wire requested = (ic_cpu_ren | dc_cpu_ren) & ~read_issued;
+
+    always @ (posedge aclk or negedge aresetn) begin
+        if (!aresetn) begin
+            read_issued <= 1'b0;
+        end else if (!ar_handshake_done && requested) begin
+            read_issued <= 1'b1;
+            ic_dev_rrdy <= 1'b0;
+            dc_dev_rrdy <= 1'b0;
+        end else if (m_axi_rvalid && m_axi_rlast) begin
+            read_issued <= 1'b0;
+            ic_dev_rrdy <= 1'b1;
+            dc_dev_rrdy <= 1'b1;
+        end
+    end
+
+    //////////////////////////////////////////////////////
+    // AR channel
+    reg ar_handshake_done;
+    always @ (posedge aclk or negedge aresetn) begin
+        if (!aresetn) begin
+            m_axi_arvalid       <=  1'b0;
+            ar_handshake_done   <=  1'b0;
+        end else if (!ar_handshake_done && requested) begin
+            m_axi_arvalid   <=  1'b1;
+            m_axi_arlen     <=  8'h3;
+            m_axi_arsize    <=  3'd2;       //4-byte = word
+            m_axi_arburst   <=  2'b01;      //INCR
+            if (ic_cpu_ren) m_axi_araddr <= ic_cpu_raddr;
+            else m_axi_araddr <= dc_cpu_raddr;
+        end else if (m_axi_arready && m_axi_arvalid) begin
+                ar_handshake_done   <=  1'b1;
+                m_axi_arvalid       <=  1'b0;
+                m_axi_arlen         <=  8'h0;
+                m_axi_arsize        <=  3'd0;
+                m_axi_arburst       <=  2'b0;
+        end
+    end
+
+    ///////////////////////////////////////////////////////
+    // R channel
+    assign m_axi_rready = 1'b1;
+    reg [`CACHE_BLK_SIZE - 1 : 0] buffer;
+    reg [2:0] r_cnt;
+    always @ (posedge aclk or negedge aresetn) begin
+        if (!aresetn) begin
+            r_cnt   <=  0;
+            buffer  <=  0;
+        end else if (m_axi_rvalid) begin
+            buffer[32*r_cnt +: 32] <= m_axi_rdata;
+            r_cnt <= r_cnt + 1;
+        end
+    end
+
+    ///////////////////////////////////////////////////////
+    // rlast & rvalid
+    reg last_pack;
+    always @ (posedge aclk or negedge aresetn) begin
+        if (saw_last) last_pack <= 1'b1;
+        else last_pack <= 1'b0;
+    end
+
+    wire saw_last = m_axi_rlast && m_axi_rvalid;
+
+    ///////////////////////////////////////////////////////
+    // Fill data & send response
+    always @ (posedge aclk or negedge aresetn) begin
+        if (!aresetn) begin
+            ic_dev_rvalid   <= 0;
+            ic_dev_rvalid   <= 0;
+            ic_dev_rrdy     <= 1'b1;
+            dc_dev_rrdy     <= 1'b1;
+        end else if (last_pack) begin
+            if (client == CLIENT_ICACHE) begin
+                ic_dev_rvalid   <= 1'b1;
+                ic_dev_rdata    <= buffer;
+                ic_dev_rrdy     <= 1'b1;
+            end else begin
+                dc_dev_rvalid   <= 1'b1;
+                dc_dev_rdata    <= buffer;
+                dc_dev_rrdy     <= 1'b1;
+            end
+            ar_handshake_done   <= 1'b0;
+            r_cnt               <= 0;
+        end else begin
+            ic_dev_rvalid   <= 0;
+            dc_dev_rvalid   <= 0;
+        end
+    end
+
 endmodule
+

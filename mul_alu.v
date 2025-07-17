@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 
+`include "defines.vh"
 module mul_alu (
     input  wire         cpu_clk,    // 时钟信号
     input  wire         cpu_rstn,   // 异步复位信号

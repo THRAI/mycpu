@@ -5,8 +5,7 @@
 module myCPU (
     input  wire         cpu_rstn,
     input  wire         cpu_clk,
-	input  wire	[ 7:0]  is_hwi,
-    
+    input wire [7:0]   is_hwi,
     // Data Access Interface
     output wire [ 3:0]  daccess_ren,    // 读使能，发出读请求时置为4'hF
     output wire [31:0]  daccess_addr,   // 读/写地址
@@ -15,7 +14,7 @@ module myCPU (
     output wire [ 3:0]  daccess_wen,    // 写使能
     output wire [31:0]  daccess_wdata,  // 写数据
     input  wire         daccess_wresp,  // 写响应
-
+    output wire [31:0]  da_addr,
     // inc_dev
 //    input  wire         ex_flag,        // 该信号有效表示需要执行指令，有效几个周期执行几条指令
 //    input  wire [31:0]  ex_inst,        // 待执行指令
@@ -33,12 +32,12 @@ module myCPU (
 
     // Debug Interface
     //chiplab测试core_top没有valid信号
-    //output wire         debug_wb_valid, // 写回阶段有效信号
+    output wire         debug_wb_valid, // 写回阶段有效信号
     output wire [31:0]  debug_wb_pc,    // 写回阶段PC值
     output wire [ 3:0]  debug_wb_ena,   // 写回阶段的寄存器堆写使能
     output wire [ 4:0]  debug_wb_reg,   // 写回阶段被写寄存器的寄存器号
     output wire [31:0]  debug_wb_value,  // 写回阶段写入寄存器的数据值
-
+    output wire [31:0]  debug_wb_inst,
     // Instruction Fetch Interface
     output wire         branch_flush,
     output wire         pause_icache, 
@@ -46,7 +45,14 @@ module myCPU (
     output wire         ifetch_rreq,    // CPU取指请求信号(取指时为1)
     output wire [31:0]  ifetch_addr,    // 取指地址
     input  wire         ifetch_valid,   // 返回指令机器码的有效信号
-    input  wire [31:0]  ifetch_inst    // 返回的指令机器码
+    input  wire [31:0]  ifetch_inst,    // 返回的指令机器码
+
+    //diff
+    //时序对应的是MEM-WB的输出
+    output wire [2:0] wb_ext_op,
+    output wire [3:0] wb_we,
+    output wire [31:0]  rf_to_diff [31:1]
+
 );
 
 /****** inc_dev ******/
@@ -147,7 +153,7 @@ wire [ 3:0] ex_ram_we;          // EX阶段的主存写使能信号（针对stor
 wire [ 1:0] ex_wd_sel;          // EX阶段的写回数据选择（选择ALU执行结果写回，或选择访存数据写回，etc.）
 wire        ex_alua_sel;        // EX阶段的ALU操作数A选择信号（选择源寄存器1的值或PC）
 wire        ex_alub_sel;        // EX阶段的ALU操作数B选择信号（选择源寄存器2的值或扩展后的立即数）
-
+wire [31:0] ex_inst;
 wire [ 4:0] ex_wR;              // EX阶段的目的寄存器
 wire [31:0] ex_rD1;             // EX阶段的源寄存器1的值
 wire [31:0] ex_rD2;             // EX阶段的源寄存器2的值
@@ -174,12 +180,13 @@ wire        ex_sc;
 
 // MEM stage signals
 wire        mem_valid;          // MEM阶段有效信号（有效表示当前有指令正处MEM阶段）
+wire [31:0] mem_inst;
 wire [ 4:0] mem_wR;             // MEM阶段的目的寄存器
 wire [31:0] mem_alu_C;          // MEM阶段的ALU运算结果
 wire [31:0] mem_rD2;            // MEM阶段的源寄存器2的值
 wire [31:0] mem_pc4;            // MEM阶段的PC值+4
 wire [31:0] mem_ext;            // MEM阶段的立即数
-
+wire [7:0]  mem_alu_op;
 wire [ 2:0] mem_ram_ext_op;     // MEM阶段的读主存数据扩展op，用于控制主存读回数据的扩展方式（针对load指令）
 wire [ 1:0] mem_wd_sel;         // MEM阶段的写回数据选择（选择ALU执行结果写回，或选择访存数据写回，etc.）
 wire        mem_rf_we;          // MEM阶段的寄存器写使能（指令需要写回时rf_we为1）
@@ -193,6 +200,7 @@ wire        mem_sc;
 
 // WB stage signals
 wire        wb_valid;           // WB阶段有效信号（有效表示当前有指令正处于WB阶段）
+wire [31:0] wb_inst;
 wire [ 4:0] wb_wR;              // WB阶段的目的寄存器
 wire [31:0] wb_pc4;             // WB阶段的PC值+4
 wire [31:0] wb_alu_C;           // WB阶段的ALU运算结果
@@ -200,7 +208,8 @@ wire [31:0] wb_ram_ext;         // WB阶段的经过扩展的读主存数据
 wire        wb_rf_we;           // WB阶段的寄存器写使能
 wire [ 1:0] wb_wd_sel;          // WB阶段的写回数据选择（选择ALU执行结果写回，或选择访存数据写回，etc.）
 reg  [31:0] wb_wd;              // WB阶段的写回数据
-
+wire [3:0]  wb_ram_we;
+wire  [2:0]      wb_ram_ext_op;
 `ifndef IMPL_TRAP
 wire        wb_we_no_excp;
 assign      wb_we_no_excp = wb_rf_we /*& !excp_occur*/;     // 发生异常时屏蔽WB阶段的写使能，使异常指令不写回
@@ -211,6 +220,8 @@ assign      ifetch_addr = if_pc;            // 以当前PC值发出取指请求
 wire        inst_valid  = ifetch_valid;
 wire [31:0] inst        = ifetch_inst;
 
+assign wb_ext_op = wb_ram_ext_op;
+assign wb_we = wb_ram_we;
 // IF
 PC u_PC(
     .cpu_clk        (cpu_clk),
@@ -322,6 +333,9 @@ reg         LLbit;      // 原子锁标志
 reg  [31:0] LLaddr;     // 原子地址
 
 
+// `ifdef DIFFTEST_EN
+// wire [31:0]  rf_to_diff [31:1];
+// `endif
 
 RF u_RF(
     .cpu_clk    (cpu_clk),
@@ -335,8 +349,10 @@ RF u_RF(
 `endif
     .wD         (wb_wd),
     .rD1        (id_rD1),
-    .rD2        (id_rD2)
-    
+    .rD2        (id_rD2),
+    //diff
+    .rf_o           (rf_to_diff) 
+   
     // inc_dev
 //    .sync_we    (sync_wb_we),
 //    .sync_dst   (sync_wb_wreg),
@@ -355,7 +371,7 @@ ID_EX u_ID_EX(
     .cpu_rstn       (cpu_rstn),
     .suspend        (ldst_suspend /*| ifetch_stall*/),
     .valid_in       (id_valid & !load_use & !pred_error),
-
+    .inst_in        (id_inst),
     .wR_in          (id_wR),
     .pc_in          (id_pc),
     .pc4_in         (id_pc4),
@@ -382,6 +398,7 @@ ID_EX u_ID_EX(
     .ram_ext_op_in  (id_ram_ext_op),
 
     .valid_out      (ex_valid),
+    .inst_out       (ex_inst),
     .wR_out         (ex_wR),
     .pc_out         (ex_pc),
     .pc4_out        (ex_pc4),
@@ -470,13 +487,13 @@ EX_MEM u_EX_MEM(
     .cpu_rstn       (cpu_rstn),
     .suspend        (ldst_suspend /*| ifetch_stall*/),
     .valid_in       (ex_valid),
-
+    .inst_in        (ex_inst),
     .wR_in          (ex_wR),
     .pc4_in         (ex_pc4),
     .alu_C_in       (ex_alu_C),
     .rD2_in         (ex_rD2),
     .ext_in         (ex_ext),
-
+    //.alu_op_in      (ex_alu_op),
     .rf_we_in       (ex_rf_we & !ldst_unalign),     // 若地址不对齐，不写回
     .wd_sel_in      (ex_wd_sel),
     .ram_we_in      (ex_ram_we),
@@ -486,12 +503,13 @@ EX_MEM u_EX_MEM(
     .sc_in          (ex_sc),
 
     .valid_out      (mem_valid),
+    .inst_out       (mem_inst),
     .wR_out         (mem_wR),
     .pc4_out        (mem_pc4),
     .alu_C_out      (mem_alu_C),
     .rD2_out        (mem_rD2),
     .ext_out        (mem_ext),
-
+    //.alu_op_out     (mem_alu_op),
     .rf_we_out      (mem_rf_we),
     .wd_sel_out     (mem_wd_sel),
     .ram_we_out     (mem_ram_we),
@@ -523,7 +541,7 @@ MEM_REQ u_MEM_REQ (
     .ex_valid       (ex_valid      ),       // EX阶段有效信号
     .mem_wd_sel     (mem_wd_sel    ),       // 区分当前是否是访存指令
     .mem_ram_addr   (mem_alu_C     ),       // 由ALU计算得到的访存地址
-
+    
     .mem_ram_ext_op (mem_ram_ext_op),       // 区分当前是哪一条load指令
     .da_ren         (daccess_ren   ),
     .da_addr        (daccess_addr  ),
@@ -540,22 +558,28 @@ MEM_WB u_MEM_WB(
     .cpu_rstn       (cpu_rstn),
     .suspend        (ldst_suspend /*| ifetch_stall*/),
     .valid_in       (mem_valid),
-
+    .inst_in        (mem_inst),
     .wR_in          (mem_wR),
     .pc4_in         (mem_pc4),
     .alu_C_in       (mem_alu_C),
     .ram_ext_in     (mem_ram_ext),
     .ext_in         (mem_ext),
-
+    .ram_ext_op_in  (mem_ram_ext_op),
     .rf_we_in       (mem_rf_we),
     .wd_sel_in      (mem_wd_sel),
+    .ram_we_in      (mem_ram_we),
+    .da_addr_in     (daccess_addr),
+    
 
+    .da_addr_out    (da_addr),
+    .ram_we_out     (wb_ram_we),
     .valid_out      (wb_valid),
     .wR_out         (wb_wR),
     .pc4_out        (wb_pc4),
     .alu_C_out      (wb_alu_C),
     .ram_ext_out    (wb_ram_ext),
-
+    .inst_out       (wb_inst),
+    .ram_ext_op_out (wb_ram_ext_op),
     .rf_we_out      (wb_rf_we),
     .wd_sel_out     (wb_wd_sel)
 );
@@ -607,7 +631,7 @@ always@(posedge cpu_clk or negedge cpu_rstn)begin
 end
 
 // Debug Interface
-//assign debug_wb_valid = wb_valid;
+assign debug_wb_valid = wb_valid;
 assign debug_wb_pc    = /*sync_wb_we ? sync_wb_pc      : */wb_pc4 - 4;
 `ifndef IMPL_TRAP
 //？奇怪，如果没有定义，wb_we_no_excp连的也是wb_rf_we
@@ -617,5 +641,5 @@ assign debug_wb_ena   = /*sync_wb_we ? {4{sync_wb_we}} : */{4{debug_wb_we}/*{wb_
 `endif
 assign debug_wb_reg   = /*sync_wb_we ? sync_wb_wreg    : */wb_wR;
 assign debug_wb_value = /*sync_wb_we ? sync_wb_wdata   : */wb_wd;
-
+assign debug_wb_inst = wb_inst;
 endmodule
