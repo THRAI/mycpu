@@ -80,10 +80,10 @@ module axi_master(
     output reg [31:0]   ducache_rdata,
 
     //D-uncache: Write Channel
-	input wire 			ducache_wen_i,
-	input wire [31:0]	ducache_wdata_i,
-    input wire [31:0]   ducache_awaddr_i,
-    output reg 			ducache_bvalid_o,
+	input wire [ 3:0]	ducache_wen, // 我们模版是4位，学长的只有一位，这里暂且改成4位
+	input wire [31:0]	ducache_wdata,
+    input wire [31:0]   ducache_awaddr,
+    output reg 			ducache_bvalid,
 );
     assign m_axi_awid    = 4'h8;
     assign m_axi_awlock  = 2'h0;
@@ -93,7 +93,7 @@ module axi_master(
 
     ///////////////////////////////////////////////////////
     // write address channel
-    wire has_dc_wr_req = dc_dev_wrdy & (dc_cpu_wen != 4'h0);
+    wire has_dc_wr_req = ducache_wen & dc_dev_wrdy & (dc_cpu_wen != 4'h0);
 
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -101,17 +101,18 @@ module axi_master(
             m_axi_awvalid <= 1'b0;
         end else begin
             if (m_axi_awvalid & m_axi_awready) begin
-                m_axi_awvalid <= 1'b0;
-                m_axi_awlen   <= 8'h0;
-                m_axi_awsize  <= 3'h0;
-                m_axi_awburst <= 2'h0;
+                m_axi_awvalid   <=  1'b0;
+                m_axi_awlen     <=  8'h0;
+                m_axi_awsize    <=  3'h0;
+                m_axi_awburst   <=  2'h0;
             end else if (has_dc_wr_req) begin
-                m_axi_awaddr  <= dc_cpu_waddr;
-                m_axi_awlen   <= 8'h1 - 1;      // 1 packages each transaction
-                m_axi_awsize  <= 3'h2;          // 2^2 bytes per package
-                m_axi_awburst <= 2'h1;          // INCR addressing mode
-                m_axi_awvalid <= 1'b1;
-            end
+                m_axi_awaddr    <=  dc_dev_wrdy ?dc_cpu_waddr : ducache_awaddr;
+                m_axi_awlen     <=  8'h1 - 1;      // 1 packages each transaction
+                m_axi_awsize    <=  3'h2;          // 2^2 bytes per package
+                m_axi_awburst   <=  2'h1;          // INCR addressing mode
+                m_axi_awvalid   <=  1'b1;
+            end 
+
         end
     end
 
@@ -127,8 +128,8 @@ module axi_master(
             if (m_axi_wvalid & m_axi_wready) begin
                 m_axi_wvalid <= 1'b0;
             end else if (has_dc_wr_req) begin
-                m_axi_wdata  <= dc_cpu_wdata;
-                m_axi_wstrb  <= dc_cpu_wen;
+                m_axi_wdata  <= dc_dev_wrdy ? dc_cpu_wdata : ducache_wdata;
+                m_axi_wstrb  <= dc_dev_wrdy ? dc_cpu_wen : ducache_wen;
                 m_axi_wvalid <= 1'b1;
             end
         end
