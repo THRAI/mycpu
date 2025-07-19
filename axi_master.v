@@ -65,16 +65,36 @@ module axi_master(
     input  wire [31:0]  m_axi_rdata ,
     input  wire [ 1:0]  m_axi_rresp ,
     input  wire         m_axi_rlast ,
-    input  wire         m_axi_rvalid
+    input  wire         m_axi_rvalid,
+
+    //I-uncached Read channel
+	input wire          iucache_ren,
+	input wire[31:0]    iucache_addr,
+	output reg          iucache_rvalid,
+	output reg[31:0]    iucache_rdata, 
+
+    //D-uncache: Read Channel
+    input wire          ducache_ren,
+    input wire [31:0]   ducache_araddr,
+    output reg          ducache_rvalid,   
+    output reg [31:0]   ducache_rdata,
+
+    //D-uncache: Write Channel
+	input wire 			ducache_wen_i,
+	input wire [31:0]	ducache_wdata_i,
+    input wire [31:0]   ducache_awaddr_i,
+    output reg 			ducache_bvalid_o,
 );
     assign m_axi_awid    = 4'h8;
     assign m_axi_awlock  = 2'h0;
-    assign m_axi_awcache = 4'h2;
+    assign m_axi_awcache = 4'h2;  //TODO: change this for uncached version
     assign m_axi_awprot  = 3'h0;
     assign m_axi_wid     = 4'h8;
 
- ///////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////
     // write address channel
+    wire has_dc_wr_req = dc_dev_wrdy & (dc_cpu_wen != 4'h0);
+
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
             m_axi_awaddr  <= 32'h0;
@@ -97,7 +117,6 @@ module axi_master(
 
     /////////////////////////////////////////////////////
     // write data channel
-    wire has_dc_wr_req = dc_dev_wrdy & (dc_cpu_wen != 4'h0);
     
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -135,21 +154,31 @@ module axi_master(
 
     //////////////////////////////////////////////////////
     // ICACHE / DCACHE read interfaces
-    reg client;
-    localparam CLIENT_ICACHE = 1'b0;
-    localparam CLIENT_DCACHE = 1'b1;
+    wire requested = (iucache_ren | ducache_ren | ic_cpu_ren | dc_cpu_ren) & ~read_issued;
+
+    reg [2:0]client;
+    localparam CLIENT_ICACHE = 3'o0;
+    localparam CLIENT_DCACHE = 3'o1;
+    localparam CLIENT_IUNCACHE = 3'o2;
+    localparam CLIENT_DUNCACHE = 3'o3; 
+    localparam CLIENT_IDLE   =  3'b100;
+    
+    wire [2:0]next_client = iucache_ren ?   CLIENT_IUNCACHE :
+                            ducache_ren ?   CLIENT_DUNCACHE :
+                            ic_cpu_ren  ?   CLIENT_ICACHE   :
+                            dc_cpu_ren  ?   CLIENT_DCACHE   :
+                            CLIENT_IDLE;      
+
     always @ (posedge aclk or negedge aresetn) begin
-        if (!ar_handshake_done && requested) begin
-            if (ic_cpu_ren) begin
-                client      <= CLIENT_ICACHE;
-            end else begin
-                client      <= CLIENT_DCACHE;
-            end
+        if (~aresetn) begin
+            client  <= CLIENT_IDLE;
+        end else if (!ar_handshake_done && requested) begin
+            client  <= next_client;
         end
     end
+    wire read_use_uncached = client[1];
 
     reg read_issued;
-    wire requested = (ic_cpu_ren | dc_cpu_ren) & ~read_issued;
 
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
@@ -170,17 +199,25 @@ module axi_master(
             ar_handshake_done   <=  1'b0;
         end else if (!ar_handshake_done && requested) begin
             m_axi_arvalid   <=  1'b1;
-            m_axi_arlen     <=  8'h3;
-            m_axi_arsize    <=  3'd2;       //4-byte = word
             m_axi_arburst   <=  2'b01;      //INCR
-            if (ic_cpu_ren) m_axi_araddr <= ic_cpu_raddr;
-            else m_axi_araddr <= dc_cpu_raddr;
+            if (ic_cpu_ren | dc_cpu_ren) begin 
+                m_axi_arlen     <=  8'h3;
+                m_axi_arsize    <=  3'd2;       //4-byte = word
+                m_axi_araddr    <=  ic_cpu_ren? ic_cpu_raddr : dc_cpu_raddr;
+                m_axi_arcache   <=  4'b1111;
+            end else if (iucache_ren | ducache_ren )begin
+                m_axi_arlen     <=  8'h0;
+                m_axi_arsize    <=  3'd2;
+                m_axi_araddr    <=  iucache_ren ? iucache_addr : ducache_araddr;
+                m_axi_arcache   <=  4'b0010;
+            end
         end else if (m_axi_arready && m_axi_arvalid) begin
                 ar_handshake_done   <=  1'b1;
                 m_axi_arvalid       <=  1'b0;
                 m_axi_arlen         <=  8'h0;
                 m_axi_arsize        <=  3'd0;
                 m_axi_arburst       <=  2'b0;
+                m_axi_arcache       <=  4'b0000;
         end
     end
 
@@ -189,13 +226,16 @@ module axi_master(
     assign m_axi_rready = 1'b1;
     reg [`CACHE_BLK_SIZE - 1 : 0] buffer;
     reg [2:0] r_cnt;
+    reg [31:0] uncached_buffer;
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
             r_cnt   <=  0;
             buffer  <=  0;
-        end else if (m_axi_rvalid) begin
+        end else if (~read_use_uncached && m_axi_rvalid) begin
             buffer[32*r_cnt +: 32] <= m_axi_rdata;
             r_cnt <= r_cnt + 1;
+        end else if (read_use_uncached) begin
+            uncached_buffer <= m_axi_rdata;
         end
     end
 
@@ -203,8 +243,7 @@ module axi_master(
     // rlast & rvalid
     reg last_pack_done; 
     always @ (posedge aclk or negedge aresetn) begin
-        if (saw_last) last_pack_done <= 1'b1;
-        else last_pack_done <= 1'b0;
+        last_pack_done  <= saw_last;
     end
 
     wire saw_last = m_axi_rlast && m_axi_rvalid;
@@ -218,18 +257,29 @@ module axi_master(
             ic_dev_rrdy     <= 1'b1;
             dc_dev_rrdy     <= 1'b1;
         end else if (last_pack_done) begin
-            if (client == CLIENT_ICACHE) begin
-                ic_dev_rvalid   <= 1'b1;
-                ic_dev_rdata    <= buffer;
-                ic_dev_rrdy     <= 1'b1;
-            end else begin
-                dc_dev_rvalid   <= 1'b1;
-                dc_dev_rdata    <= buffer;
-                dc_dev_rrdy     <= 1'b1;
-            end
+            case (client)
+                CLIENT_ICACHE: begin
+                    ic_dev_rvalid   <= 1'b1;
+                    ic_dev_rdata    <= buffer;
+                end
+                CLIENT_DCACHE: begin
+                    dc_dev_rvalid   <= 1'b1;
+                    dc_dev_rdata    <= buffer;
+                end
+                CLIENT_IUNCACHE: begin
+                    iucache_rvalid  <= 1'b1;
+                    iucache_rdata   <= uncached_buffer;
+                end
+                CLIENT_DUNCACHE: begin
+                    ducache_rvalid  <= 1'b1;
+                    ducache_rdata   <= uncached_buffer;
+                end
+            endcase
             ar_handshake_done   <= 0; //统一处理前面的
             r_cnt               <= 0;
             read_issued         <= 0;
+            ic_dev_rrdy         <= 1'b1;
+            dc_dev_rrdy         <= 1'b1;
         end else begin
             ic_dev_rvalid   <= 0;
             dc_dev_rvalid   <= 0;
