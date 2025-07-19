@@ -72,7 +72,6 @@ module axi_master(
     assign m_axi_awcache = 4'h2;
     assign m_axi_awprot  = 3'h0;
     assign m_axi_wid     = 4'h8;
-    wire has_dc_wr_req = dc_dev_wrdy & (dc_cpu_wen != 4'h0);
 
  ///////////////////////////////////////////////////////
     // write address channel
@@ -98,6 +97,8 @@ module axi_master(
 
     /////////////////////////////////////////////////////
     // write data channel
+    wire has_dc_wr_req = dc_dev_wrdy & (dc_cpu_wen != 4'h0);
+    
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
             m_axi_wdata  <= 32'h0;
@@ -157,11 +158,7 @@ module axi_master(
             read_issued <= 1'b1;
             ic_dev_rrdy <= 1'b0;
             dc_dev_rrdy <= 1'b0;
-        end else if (m_axi_rvalid && m_axi_rlast) begin
-            read_issued <= 1'b0;
-            ic_dev_rrdy <= 1'b1;
-            dc_dev_rrdy <= 1'b1;
-        end
+        end     
     end
 
     //////////////////////////////////////////////////////
@@ -204,10 +201,10 @@ module axi_master(
 
     ///////////////////////////////////////////////////////
     // rlast & rvalid
-    reg last_pack;
+    reg last_pack_done; 
     always @ (posedge aclk or negedge aresetn) begin
-        if (saw_last) last_pack <= 1'b1;
-        else last_pack <= 1'b0;
+        if (saw_last) last_pack_done <= 1'b1;
+        else last_pack_done <= 1'b0;
     end
 
     wire saw_last = m_axi_rlast && m_axi_rvalid;
@@ -217,10 +214,10 @@ module axi_master(
     always @ (posedge aclk or negedge aresetn) begin
         if (!aresetn) begin
             ic_dev_rvalid   <= 0;
-            ic_dev_rvalid   <= 0;
+            dc_dev_rvalid   <= 0;
             ic_dev_rrdy     <= 1'b1;
             dc_dev_rrdy     <= 1'b1;
-        end else if (last_pack) begin
+        end else if (last_pack_done) begin
             if (client == CLIENT_ICACHE) begin
                 ic_dev_rvalid   <= 1'b1;
                 ic_dev_rdata    <= buffer;
@@ -230,8 +227,9 @@ module axi_master(
                 dc_dev_rdata    <= buffer;
                 dc_dev_rrdy     <= 1'b1;
             end
-            ar_handshake_done   <= 1'b0;
+            ar_handshake_done   <= 0; //统一处理前面的
             r_cnt               <= 0;
+            read_issued         <= 0;
         end else begin
             ic_dev_rvalid   <= 0;
             dc_dev_rvalid   <= 0;

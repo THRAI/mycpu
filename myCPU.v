@@ -583,7 +583,11 @@ MEM_WB u_MEM_WB(
     .rf_we_out      (wb_rf_we),
     .wd_sel_out     (wb_wd_sel)
 );
-
+reg debug_wbvalid;
+always@(posedge cpu_clk or negedge cpu_rstn)begin
+    if(!cpu_rstn) debug_wbvalid <= 1'b0;
+    else debug_wbvalid <= mem_valid;
+end
 // WB
 // 根据选择信号，在WB阶段选择相应的数据用于前递
 always @(*) begin
@@ -629,9 +633,26 @@ always@(posedge cpu_clk or negedge cpu_rstn)begin
     else if(mem_rf_we) debug_wb_we <= 1'd1;
     else debug_wb_we <= 1'd0;
 end
-
+// reg [4:0]debug_wb_wR;
+// always@(posedge cpu_clk or negedge cpu_rstn)begin
+//     if(!cpu_rstn) debug_wb_wR <= 32'd0;
+//     else if(mem_rf_we) debug_wb_wR <= wb_wR;
+//     else debug_wb_wR <= 32'd0;
+// end
+// reg [31:0]debug_wb_wd;
+// always@(posedge cpu_clk or negedge cpu_rstn)begin
+//     if(!cpu_rstn) debug_wb_wd <= 1'd0;
+//     else if(mem_rf_we) debug_wb_wd <= 1'd1;
+//     else debug_wb_wd <= 1'd0;
+// end
+// reg [31:0]debug_wb_pc4;
+// reg debug_wbvalid;
+// always@(posedge cpu_clk or negedge cpu_rstn)begin
+//     if(!cpu_rstn) debug_wbvalid <= 1'd0;
+//     else if
 // Debug Interface
-assign debug_wb_valid = wb_valid;
+//还是不对，不能喝debug_wb_we同步，继续改
+assign debug_wb_valid = debug_wbvalid & wb_valid;//通过波形分析出来的？无非是因为suspend影响了
 assign debug_wb_pc    = /*sync_wb_we ? sync_wb_pc      : */wb_pc4 - 4;
 `ifndef IMPL_TRAP
 //？奇怪，如果没有定义，wb_we_no_excp连的也是wb_rf_we
